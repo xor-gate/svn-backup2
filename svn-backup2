@@ -63,15 +63,16 @@ function load_config_file() {
 
 ###
 # Store the state of a repository backup run
+#
+# Needs:
+#  REPO_STATE_FILE
 ###
 function repository_store_state() {
-	FILE="${SVNBACKUP2_BACKUP_STATE_PATH}/${REPO_NAME}.state"
-
-	export SVNBACKUP2_REPO_STATE_CHECKSUM
-	export SVNBACKUP2_REPO_STATE_LAST_REVISION
 	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_END_TIME=$(date +%s)
-
-	env | grep SVNBACKUP2_REPO_ > "${FILE}"
+	env | grep SVNBACKUP2_REPO_ > "${REPO_STATE_FILE}"
+	# debug
+	echo "${REPO_STATE_FILE}:"
+	cat "${REPO_STATE_FILE}"
 }
 
 ###
@@ -108,15 +109,15 @@ function repository_load_state() {
 #  REPO_CHECKSUM_OK
 ###
 function repository_backup_integrity_check() {
-	REPO_CHECKSUM_OK=1
+	REPO_CHECKSUM_OK=0
 
 	if [ ! -f "${REPO_BACKUP_FILE}" ]; then
 		log "No backup exists for ${REPO_NAME} repository, integrity check skipped"
 		return
 	fi
 
-	if [[ "${SVNBACKUP2_REPO_STATE_CHECKSUM}" ]]; then
-		log "ERROR: Previous backup run didn't wrote checksum"
+	if [[ -z "${SVNBACKUP2_REPO_STATE_CHECKSUM}" ]]; then
+		log "ERROR: Previous backup run didn't wrote checksum in the state file"
 		return
 	fi
 
@@ -124,8 +125,10 @@ function repository_backup_integrity_check() {
 	REPO_CHECKSUM=$(sha256sum "${REPO_BACKUP_FILE}" | awk '{print $1;}')
 
 	if [ "${REPO_CHECKSUM}" != "${SVNBACKUP2_REPO_STATE_CHECKSUM}" ]; then
-		log "Repository integrity check failed"
-		REPO_CHECKSUM_OK=0
+		log "ERROR: Repository integrity check failed"
+	else
+		log "Repository checksum OK"
+		REPO_CHECKSUM_OK=1
 	fi
 }
 
@@ -146,33 +149,51 @@ function repository_backup_create_checksum() {
 
 	SVNBACKUP2_REPO_STATE_CHECKSUM=$(sha256sum "${REPO_BACKUP_FILE}" | awk '{print $1;}')
 	export SVNBACKUP2_REPO_STATE_CHECKSUM
+}
 
-	log "Checksum ${SVNBACKUP2_REPO_STATE_CHECKSUM} for ${REPO_NAME}"
+###
+# Finish backup by printing how long it took for a single repository
+###
+function repository_backup_finish() {
+	REPO_BACKUP_TIME_DURATION_SEC=$(($SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME-$SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME))
+	if [ $REPO_BACKUP_TIME_DURATION_SEC = 0 ]; then
+		REPO_BACKUP_TIME_DURATION_SEC=1
+	fi
+
+	REPO_BACKUP_TIME_MIN=$(($REPO_BACKUP_TIME_DURATION_SEC / 60))
+	REPO_BACKUP_TIME_SEC=$(($REPO_BACKUP_TIME_DURATION_SEC % 60))
+	REPO_BACKUP_TIME="${REPO_BACKUP_TIME_MIN} minutes ${REPO_BACKUP_TIME_SEC} seconds"
+
+	log "Finished backup of repository ${REPO_NAME}"
+	log "Backup took ${REPO_BACKUP_TIME}"
 }
 
 ###
 # Backup a single repository
 #
 # $1: Name of the repository located in $SVNBACKUP2_CFG_REPOSITORIES_PATH
+#
+# Sets:
+#  REPO_NAME
 ##
 function repository_backup() {
 	export REPO_NAME="$1"
 
-	# Start backup
-	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME=$(date +%s)
-	log "Starting backup of ${REPO_NAME}"
-
 	# Load previous state and check integrity
 	repository_load_state
+
+	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME="$(date +%s)"
+	log "Start backup of repository ${REPO_NAME}"
+
 	repository_backup_integrity_check
 
+	# Create backup
 	touch "${REPO_BACKUP_FILE}" # test
 
 	# Finalize backup
 	repository_backup_create_checksum
 	repository_store_state
-
-	log "Finished backup of ${REPO_NAME}"
+	repository_backup_finish
 }
 
 check_and_create_paths
