@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+# From: https://github.com/xor-gate/svn-backup2
+##
+VERSION="0.1.0"
+
+###
+# Fixed paths
+###
+SVNBACKUP2_CONFIG_FILE="/etc/svn-backup2.conf"
+SVNBACKUP2_LOG_FILE="/var/log/svn-backup2.log"
+SVNBACKUP2_BACKUP_STATE_PATH="/var/tmp/svn-backup2"
+
+###
+# Defaults
+###
+SVNBACKUP2_CFG_REPOSITORIES_PATH="/srv/svn"
+SVNBACKUP2_CFG_BACKUP_PATH="/srv/svn-backup2"
+
+###
+# Log to stdout and archive to file with datetime prefix
+#
+# $1: Logline
+###
+function log() {
+	echo -e "[$(date)] $1" | tee -a ${SVNBACKUP2_LOG_FILE}
+}
+
+###
+# Check and create paths
+###
+function check_and_create_paths() {
+	if [ ! -f ${SVNBACKUP2_LOG_FILE} ]; then
+		touch ${SVNBACKUP2_LOG_FILE}
+	fi
+
+	if [ ! -d ${SVNBACKUP2_BACKUP_STATE_PATH} ]; then
+		mkdir -p ${SVNBACKUP2_BACKUP_STATE_PATH}
+		log "Created backup state directory \"${SVNBACKUP2_BACKUP_STATE_PATH}\""
+	fi
+
+	if [ ! -f ${SVNBACKUP2_CONFIG_FILE} ]; then
+		export SVNBACKUP2_CFG_REPOSITORIES_PATH
+		export SVNBACKUP2_CFG_BACKUP_PATH
+
+		env | grep SVNBACKUP2_CFG > ${SVNBACKUP2_CONFIG_FILE}
+		log "Created configuration file with defaults at \"${SVNBACKUP2_CONFIG_FILE}\""
+	fi
+
+	if [ ! -d ${SVNBACKUP2_CFG_BACKUP_PATH} ]; then
+		mkdir -p ${SVNBACKUP2_CFG_BACKUP_PATH}
+		log "Created backup path at \"${SVNBACKUP2_CFG_BACKUP_PATH}\""
+	fi
+}
+
+function load_config_file() {
+	set -a
+	source ${SVNBACKUP2_CONFIG_FILE}
+	set +a
+
+	export SVNBACKUP2_CFG_REPOSITORIES_PATH
+	export SVNBACKUP2_CFG_BACKUP_PATH
+}
+
+###
+# Store the state of a repository backup run
+###
+function repository_store_state() {
+	FILE="${SVNBACKUP2_BACKUP_STATE_PATH}/${REPO_NAME}.state"
+
+	export SVNBACKUP2_REPO_STATE_CHECKSUM
+	export SVNBACKUP2_REPO_STATE_LAST_REVISION
+	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_END_TIME=$(date +%s)
+
+	env | grep SVNBACKUP2_REPO_ > "${FILE}"
+}
+
+###
+# Load previous state of repository backup run
+#
+# Needs:
+#  REPO_NAME
+#  SVNBACKUP2_BACKUP_STATE_PATH
+#  SVNBACKUP2_CFG_BACKUP_PATH
+# Sets
+#  REPO_BACKUP_FILE_EXIST
+###
+function repository_load_state() {
+	export REPO_STATE_FILE="${SVNBACKUP2_BACKUP_STATE_PATH}/${REPO_NAME}.state"
+	export REPO_BACKUP_FILE="${SVNBACKUP2_CFG_BACKUP_PATH}/${REPO_NAME}.svnbackup2"
+	REPO_BACKUP_FILE_EXISTS=0
+
+	if [ ! -f ${REPO_STATE_FILE} ]; then
+		return
+	fi
+
+	source ${REPO_STATE_FILE}
+	REPO_BACKUP_FILE_EXISTS=1
+}
+
+###
+# Check integrity of an existing repository backup
+#
+# Needs:
+#  REPO_NAME
+#  REPO_BACKUP_FILE
+#  SVNBACKUP2_REPO_STATE_CHECKSUM
+# Sets:
+#  REPO_CHECKSUM_OK
+###
+function repository_backup_integrity_check() {
+	REPO_CHECKSUM_OK=1
+
+	if [ ! -f "${REPO_BACKUP_FILE}" ]; then
+		log "No backup exists for ${REPO_NAME} repository, integrity check skipped"
+		return
+	fi
+
+	if [[ "${SVNBACKUP2_REPO_STATE_CHECKSUM}" ]]; then
+		log "ERROR: Previous backup run didn't wrote checksum"
+		return
+	fi
+
+	log "Checking integrity of file ${REPO_BACKUP_FILE}"
+	REPO_CHECKSUM=$(sha256sum "${REPO_BACKUP_FILE}" | awk '{print $1;}')
+
+	if [ "${REPO_CHECKSUM}" != "${SVNBACKUP2_REPO_STATE_CHECKSUM}" ]; then
+		log "Repository integrity check failed"
+		REPO_CHECKSUM_OK=0
+	fi
+}
+
+###
+# Create checksum of repository backup file
+#
+# Needs:
+#  REPO_NAME
+#  REPO_BACKUP_FILE
+# Sets:
+#  SVNBACKUP2_REPO_STATE_CHECKSUM
+###
+function repository_backup_create_checksum() {
+	if [ ! -f "${REPO_BACKUP_FILE}" ]; then
+		log "No backup created for repository \"${REPO_NAME}\", checksum skipped"
+		return
+	fi
+
+	SVNBACKUP2_REPO_STATE_CHECKSUM=$(sha256sum "${REPO_BACKUP_FILE}" | awk '{print $1;}')
+	export SVNBACKUP2_REPO_STATE_CHECKSUM
+
+	log "Checksum ${SVNBACKUP2_REPO_STATE_CHECKSUM} for ${REPO_NAME}"
+}
+
+###
+# Backup a single repository
+#
+# $1: Name of the repository located in $SVNBACKUP2_CFG_REPOSITORIES_PATH
+##
+function repository_backup() {
+	export REPO_NAME="$1"
+
+	# Start backup
+	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME=$(date +%s)
+	log "Starting backup of ${REPO_NAME}"
+
+	# Load previous state and check integrity
+	repository_load_state
+	repository_backup_integrity_check
+
+	touch "${REPO_BACKUP_FILE}" # test
+
+	# Finalize backup
+	repository_backup_create_checksum
+	repository_store_state
+
+	log "Finished backup of ${REPO_NAME}"
+}
+
+check_and_create_paths
+load_config_file
+
+repository_backup "test"
