@@ -29,6 +29,26 @@ function log() {
 # Check and create paths
 ###
 function check_and_create_paths() {
+	if [ ! command -v svnadmin &> /dev/null ]; then
+		log "ERROR svnadmin not found, is subversion installed?"
+		exit
+	fi
+
+	if [ ! command -v svnlook &> /dev/null ]; then
+		log "ERROR svnlook not found, is subversion installed?"
+		exit
+	fi
+
+	if [ ! command -v sha256sum &> /dev/null ]; then
+		log "ERROR sha256sum not found, is coreutils installed?"
+		exit
+	fi
+
+	if [ ! command -v gzip &> /dev/null ]; then
+		log "ERROR gzip not found, is gzip installed?"
+		exit
+	fi
+
 	if [ ! -f ${SVNBACKUP2_LOG_FILE} ]; then
 		touch ${SVNBACKUP2_LOG_FILE}
 	fi
@@ -52,6 +72,13 @@ function check_and_create_paths() {
 	fi
 }
 
+###
+# Load global configuration file from $SVNBACKUP2_CONFIG_FILE
+#
+# Sets:
+#  SVNBACKUP2_CFG_REPOSITORIES_PATH
+#  SVNBACKUP2_CFG_BACKUP_PATH
+###
 function load_config_file() {
 	set -a
 	source ${SVNBACKUP2_CONFIG_FILE}
@@ -70,9 +97,6 @@ function load_config_file() {
 function repository_store_state() {
 	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_END_TIME=$(date +%s)
 	env | grep SVNBACKUP2_REPO_ > "${REPO_STATE_FILE}"
-	# debug
-	echo "${REPO_STATE_FILE}:"
-	cat "${REPO_STATE_FILE}"
 }
 
 ###
@@ -152,7 +176,7 @@ function repository_backup_create_checksum() {
 }
 
 ###
-# Finish backup by printing how long it took for a single repository
+# Finish backup by printing how long it took for a single repository backup run
 ###
 function repository_backup_finish() {
 	REPO_BACKUP_TIME_DURATION_SEC=$(($SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME-$SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME))

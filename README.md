@@ -3,6 +3,8 @@
 Frugal Subversion backup solution inspired by [adamonduty/svn-backup](https://github.com/adamonduty/svn-backup).
 Written and tested for Debian 12 in Bash but could be adapted to other systems.
 
+This script must be executed as root. I
+
 ## Installation
 
 Install dependencies (Debian 12):
