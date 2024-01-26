@@ -253,6 +253,12 @@ function repository_backup_subversion() {
 	if [ ! -f ${REPO_BACKUP_FILE} ]; then
 		log "Running full backup between 0:${YOUNGEST} revisions"
 		svnadmin dump -q -r "0:${YOUNGEST}" "${REPO_PATH}" | gzip -c > "${REPO_BACKUP_FILE}" 2> /dev/null
+
+		if [ $? = 0 ]; then
+			log "svnadmin dump ok"
+		else
+			log "ERROR: something went wrong during svnadmin dump"
+		fi
 	elif [ ${YOUNGEST} = ${SVNBACKUP2_REPO_STATE_YOUNGEST} ]; then
 		log "Backup already up to date"
 		REPO_BACKUP_FILE_CHANGED=0
@@ -261,6 +267,12 @@ function repository_backup_subversion() {
 
 		log "Running incremental backup between ${REV_FILTER} revisions"
 		svnadmin dump -q -r ${REV_FILTER} --incremental "${REPO_PATH}" | gzip -c >> "${REPO_BACKUP_FILE}" 2> /dev/null
+
+		if [ $? = 0 ]; then
+			log "svnadmin dump ok"
+		else
+			log "ERROR: something went wrong during svnadmin dump"
+		fi
 	fi
 
 	export SVNBACKUP2_REPO_STATE_YOUNGEST=${YOUNGEST}
@@ -301,7 +313,7 @@ function repository_backup() {
 	repository_load_state
 
 	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME="$(date +%s)"
-	log "Start backup of repository ${REPO_NAME}"
+	log "Starting backup of repository ${REPO_NAME}"
 
 	repository_backup_integrity_check
 
@@ -315,7 +327,75 @@ function repository_backup() {
 	repository_store_state
 }
 
+###
+# Discover and backup all repositories in SVNBACKUP2_CFG_REPOSITORIES_PATH
+###
+function repositories_backup() {
+	for repository in `ls -1 ${SVNBACKUP2_CFG_REPOSITORIES_PATH}`; do
+		repository_path="${SVNBACKUP2_CFG_REPOSITORIES_PATH}/${repository}"
+		if [ ! -d "${repository_path}/db" ]; then
+			continue
+		fi
+		repository_backup "${repository}"
+	done
+}
+
+###
+# Full backup operation from CLI
+#
+# $1: What to backup forced-full (e.g 'all' or '<repository name>')
+###
+function operation_full_backup() {
+	what=$1
+
+	if [ "${what}" = '' ]; then
+		log "ERROR: Please specify 'all' or '<repository name>' to force full backup"
+		exit 1
+	fi
+
+	case ${what} in
+		all)
+			rm_filter="${SVNBACKUP2_CFG_BACKUP_PATH}/*.svnbackup2"
+			log "Removing all old backups at ${rm_filter}"
+			rm ${rm_filter} 
+			repositories_backup
+			;;
+		*)
+			rm_filter="${SVNBACKUP2_CFG_BACKUP_PATH}/${what}.svnbackup2"
+			log "Removing backup at ${rm_filter}"
+			rm  ${rm_filter}
+			repository_backup "${what}"
+			;;
+	esac
+}
+
+###
+# Help operation from CLI
+###
+function operation_help() {
+	echo "Usage: svn-backup2 [operation] <args>"
+	echo "  version                         Print the version"
+	echo "  full [<repository name> | all]  Force full backup on repository or \"all\""
+}
+
 check_and_create_paths
 load_config_file
 
-repository_backup "testrepo1"
+###
+# Argparse
+###
+ARG_OPERATION=$1
+case ${ARG_OPERATION} in
+	help)
+		operation_help
+		;;
+	version)
+		echo ${VERSION}
+		;;
+	full)
+		operation_full_backup $2
+		;;
+	*)
+		repositories_backup
+		;;
+esac
