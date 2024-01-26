@@ -1,5 +1,33 @@
 #!/usr/bin/env bash
-# From: https://github.com/xor-gate/svn-backup2
+#
+# `svn-backup2` is a frugal and minimalistic subversion backup solution.
+# It generates and update just a single gzipped and sha256 checksumed file per repository.
+# At first run it generates a full-backup and runs `svnadmin verify`
+# The next runs append an incremental backup when there are changes. Before every append the
+# backup integrity is checked.
+#
+# svn-backup2 is licensed under MIT
+#
+# Copyright (c) 2024 Jerry Jacobs <https://xor-gate.org>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+# Application is hosted at: https://github.com/xor-gate/svn-backup2
 ##
 VERSION="0.1.0"
 
@@ -31,50 +59,55 @@ function log() {
 ###
 function check_and_create_paths() {
 	if [ ! command -v svnadmin &> /dev/null ]; then
-		log "ERROR svnadmin not found, is subversion installed?"
-		exit
+		log "ERROR: svnadmin not found in PATH, is subversion installed?"
+		exit 1
 	fi
 
 	if [ ! command -v svnlook &> /dev/null ]; then
-		log "ERROR svnlook not found, is subversion installed?"
-		exit
+		log "ERROR: svnlook not found in PATH, is subversion installed?"
+		exit 1
 	fi
 
 	if [ ! command -v sha256sum &> /dev/null ]; then
-		log "ERROR sha256sum not found, is coreutils installed?"
-		exit
+		log "ERROR: sha256sum not found in PATH, is coreutils installed?"
+		exit 1
 	fi
 
 	if [ ! command -v gzip &> /dev/null ]; then
-		log "ERROR gzip not found, is gzip installed?"
-		exit
+		log "ERROR: gzip not found, is gzip installed?"
+		exit 1
 	fi
 
 	if [ ! -f ${SVNBACKUP2_LOG_FILE} ]; then
 		touch ${SVNBACKUP2_LOG_FILE}
 	fi
 
-	if [ ! -d ${SVNBACKUP2_CFG_REPOSITORIES_PATH} ]; then
-		mkdir -p ${SVNBACKUP2_CFG_REPOSITORIES_PATH} 
-		log "Created repositories path at ${SVNBACKUP2_CFG_REPOSITORIES_PATH}"
-	fi
-
 	if [ ! -d ${SVNBACKUP2_BACKUP_STATE_PATH} ]; then
 		mkdir -p ${SVNBACKUP2_BACKUP_STATE_PATH}
-		log "Created backup state directory \"${SVNBACKUP2_BACKUP_STATE_PATH}\""
+		log "Created backup state directory ${SVNBACKUP2_BACKUP_STATE_PATH}"
 	fi
 
+	# Check if configuration file exists, or else create it with some defaults for convience
 	if [ ! -f ${SVNBACKUP2_CONFIG_FILE} ]; then
 		export SVNBACKUP2_CFG_REPOSITORIES_PATH
 		export SVNBACKUP2_CFG_BACKUP_PATH
 
 		env | grep SVNBACKUP2_CFG > ${SVNBACKUP2_CONFIG_FILE}
-		log "Created configuration file with defaults at \"${SVNBACKUP2_CONFIG_FILE}\""
+		log "Created configuration file with defaults at ${SVNBACKUP2_CONFIG_FILE}"
+		log "NOTICE: Please run svn-backup2 again when configuration has been set"
+		exit 1
 	fi
 
+	# When the backup path doesn't exist create it
 	if [ ! -d ${SVNBACKUP2_CFG_BACKUP_PATH} ]; then
-		mkdir -p ${SVNBACKUP2_CFG_BACKUP_PATH}
-		log "Created backup path at \"${SVNBACKUP2_CFG_BACKUP_PATH}\""
+		log "ERROR: Backup path doesn't exist ${SVNBACKUP2_CFG_BACKUP_PATH}"
+		exit 1
+	fi
+
+	# Check if repositories path exist
+	if [ ! -d ${SVNBACKUP2_CFG_REPOSITORIES_PATH} ]; then
+		log "ERROR: Repositories path doesn't exists at ${SVNBACKUP2_CFG_REPOSITORIES_PATH}"
+		exit 1
 	fi
 }
 
@@ -95,14 +128,15 @@ function load_config_file() {
 }
 
 ###
-# Store the state of a repository backup run
+# Store the state of a single repository backup run.
+# It will write all SVNBACKUP2_REPO_STATE_* vars to the repository state file
 #
 # Needs:
 #  REPO_STATE_FILE
 ###
 function repository_store_state() {
 	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_END_TIME=$(date +%s)
-	env | grep SVNBACKUP2_REPO_ > "${REPO_STATE_FILE}"
+	env | grep SVNBACKUP2_REPO_STATE_ > "${REPO_STATE_FILE}"
 }
 
 ###
@@ -113,21 +147,21 @@ function repository_store_state() {
 #  SVNBACKUP2_BACKUP_STATE_PATH
 #  SVNBACKUP2_CFG_BACKUP_PATH
 # Sets
-#  REPO_BACKUP_FILE_EXIST
+#  REPO_PATH
+#  REPO_STATE_FILE
+#  REPO_BACKUP_FILE
 ###
 function repository_load_state() {
+	export REPO_PATH="${SVNBACKUP2_CFG_REPOSITORIES_PATH}/${REPO_NAME}"
 	export REPO_STATE_FILE="${SVNBACKUP2_BACKUP_STATE_PATH}/${REPO_NAME}.state"
 	export REPO_BACKUP_FILE="${SVNBACKUP2_CFG_BACKUP_PATH}/${REPO_NAME}.svnbackup2"
-	export REPO_PATH="${SVNBACKUP2_CFG_REPOSITORIES_PATH}/${REPO_NAME}"
-
-	REPO_BACKUP_FILE_EXISTS=0
 
 	if [ ! -f ${REPO_STATE_FILE} ]; then
 		return
 	fi
 
+	SVNBACKUP2_REPO_STATE_YOUNGEST=0
 	source ${REPO_STATE_FILE}
-	REPO_BACKUP_FILE_EXISTS=1
 }
 
 ###
@@ -164,7 +198,7 @@ function repository_backup_integrity_check() {
 		return
 	fi
 
-	log "Checking integrity of file ${REPO_BACKUP_FILE}"
+	log "Checking integrity of backup file ${REPO_BACKUP_FILE}"
 	REPO_CHECKSUM=$(sha256sum "${REPO_BACKUP_FILE}" | awk '{print $1;}')
 
 	if [ "${REPO_CHECKSUM}" != "${SVNBACKUP2_REPO_STATE_CHECKSUM}" ]; then
@@ -176,22 +210,60 @@ function repository_backup_integrity_check() {
 }
 
 ###
-# Create checksum of repository backup file
+# Create checksum of repository backup file when REPO_BACKUP_FILE_CHANGED
 #
 # Needs:
 #  REPO_NAME
 #  REPO_BACKUP_FILE
+#  REPO_BACKUP_FILE_CHANGED
 # Sets:
 #  SVNBACKUP2_REPO_STATE_CHECKSUM
 ###
 function repository_backup_create_checksum() {
 	if [ ! -f "${REPO_BACKUP_FILE}" ]; then
-		log "No backup created for repository \"${REPO_NAME}\", checksum skipped"
+		log "WARNING: No backup created for repository \"${REPO_NAME}\", checksum skipped"
 		return
 	fi
 
-	SVNBACKUP2_REPO_STATE_CHECKSUM=$(sha256sum "${REPO_BACKUP_FILE}" | awk '{print $1;}')
+	if [ $REPO_BACKUP_FILE_CHANGED = 1 ]; then
+		log "Generating checksum for backup"
+		SVNBACKUP2_REPO_STATE_CHECKSUM=$(sha256sum "${REPO_BACKUP_FILE}" | awk '{print $1;}')
+	fi
+
 	export SVNBACKUP2_REPO_STATE_CHECKSUM
+}
+
+###
+# Lookup youngest subversion revision and check if a backup must be made
+#
+# Needs:
+#  REPO_PATH
+#  REPO_BACKUP_FILE
+#  SVNBACKUP2_REPO_STATE_YOUNGEST
+# Sets:
+#  REPO_BACKUP_FILE_CHANGED
+#  SVNBACKUP2_REPO_STATE_YOUNGEST
+###
+function repository_backup_subversion() {
+	REPO_BACKUP_FILE_CHANGED=1
+	YOUNGEST=$(svnlook youngest "${REPO_PATH}")
+
+	log "Detected latest revision of repository is ${YOUNGEST}, backup has archived until revision ${SVNBACKUP2_REPO_STATE_YOUNGEST}"
+
+	if [ ! -f ${REPO_BACKUP_FILE} ]; then
+		log "Running full backup between 0:${YOUNGEST} revisions"
+		svnadmin dump -q -r "0:${YOUNGEST}" "${REPO_PATH}" | gzip -c > "${REPO_BACKUP_FILE}" 2> /dev/null
+	elif [ ${YOUNGEST} = ${SVNBACKUP2_REPO_STATE_YOUNGEST} ]; then
+		log "Backup already up to date"
+		REPO_BACKUP_FILE_CHANGED=0
+	else
+		REV_FILTER="$(($SVNBACKUP2_REPO_STATE_YOUNGEST + 1)):${YOUNGEST}"
+
+		log "Running incremental backup between ${REV_FILTER} revisions"
+		svnadmin dump -q -r ${REV_FILTER} --incremental "${REPO_PATH}" | gzip -c >> "${REPO_BACKUP_FILE}" 2> /dev/null
+	fi
+
+	export SVNBACKUP2_REPO_STATE_YOUNGEST=${YOUNGEST}
 }
 
 ###
@@ -209,6 +281,9 @@ function repository_backup_finish() {
 
 	log "Finished backup of repository ${REPO_NAME}"
 	log "Backup took ${REPO_BACKUP_TIME}"
+
+	SVNBACKUP2_REPO_STATE_LAST_BACKUP_DURATION=${REPO_BACKUP_TIME_DURATION_SEC}
+	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_DURATION
 }
 
 ###
@@ -231,12 +306,13 @@ function repository_backup() {
 	repository_backup_integrity_check
 
 	# Create backup
+	repository_backup_subversion
 	touch "${REPO_BACKUP_FILE}" # test
 
 	# Finalize backup
 	repository_backup_create_checksum
-	repository_store_state
 	repository_backup_finish
+	repository_store_state
 }
 
 check_and_create_paths
