@@ -6,7 +6,7 @@
 # The next runs append an incremental backup when there are changes. Before every append the
 # backup integrity is checked.
 #
-# svn-backup2 is licensed under MIT
+# svn-backup2 is licensed under the MIT License
 #
 # Copyright (c) 2024 Jerry Jacobs <https://xor-gate.org>
 #
@@ -36,11 +36,10 @@ VERSION="0.1.0"
 ###
 SVNBACKUP2_CONFIG_FILE="/etc/svn-backup2.conf"
 SVNBACKUP2_LOG_FILE="/var/log/svn-backup2.log"
-SVNBACKUP2_SVNADMIN_VERIFY_LOG_FILE="/var/log/svn-backup2_svnadmin_verify.log"
 SVNBACKUP2_BACKUP_STATE_PATH="/var/tmp/svn-backup2"
 
 ###
-# Defaults
+# Configuration defaults
 ###
 SVNBACKUP2_CFG_REPOSITORIES_PATH="/srv/svn"
 SVNBACKUP2_CFG_BACKUP_PATH="/srv/svn-backup2"
@@ -94,6 +93,7 @@ function check_and_create_paths() {
 
 		env | grep SVNBACKUP2_CFG > ${SVNBACKUP2_CONFIG_FILE}
 		log "Created configuration file with defaults at ${SVNBACKUP2_CONFIG_FILE}"
+		cat ${SVNBACKUP2_CONFIG_FILE}
 		log "NOTICE: Please run svn-backup2 again when configuration has been set"
 		exit 1
 	fi

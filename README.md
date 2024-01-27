@@ -1,16 +1,22 @@
 # svn-backup2
 
-Frugal Subversion backup solution inspired by [adamonduty/svn-backup](https://github.com/adamonduty/svn-backup).
-Written and tested for Debian 12 in Bash but could be adapted to other systems.
+The `svn-backup2` application is a frugal Subversion backup solution inspired by [adamonduty/svn-backup](https://github.com/adamonduty/svn-backup).
+Orignally written and tested for Debian 12 in Bash but could be adapted to other systems.
 
 It creates and updates a single file per repository and consists of multiple gzip compressed archives. It is sha256 checksumed to
 detect bit-rot before appending a new incremental backup. This is possible because `svnadmin load` is able to load from a stream of multiple gzip dumps. 
+At first run it generates a full-backup and runs `svnadmin verify`.
 
 This script is designed to be run as root. But it is possible when correct permissions are given to run as non-root user.
 
+Features and limitations:
+
+ * Only supports one subversion root path which can contain multiple repositories
+ * Single repository backup file for simplicity of restoration and efficient offsite backup transfering with `rsync`
+
 ## Installation
 
-Install dependencies (Debian 12):
+Install dependencies on Debian Linux 12:
 
 `apt install subversion curl`
 
@@ -22,7 +28,8 @@ Download and install to `/usr/local/bin/svn-backup2` in oneline with curl:
 
 * `/etc/svn-backup2.conf`: Configuration file
 * `/var/log/svn-backup2.log`: Logfile
-* `/srv/svn-backup2/<repository name>.svnbackup2`: Backup file (multiple concatinated gzip files)
+* `/srv/svn`: Subversion repositories root path (configurable)
+* `/srv/svn-backup2/<repository name>.svnbackup2`: Backup file (multiple concatinated gzip files) (configurable)
 * `/var/tmp/svn-backup2/<repository name>.state`: State of a single repository backup
 
 ## Configuration file (`/etc/svn-backup2.conf`)
@@ -53,8 +60,9 @@ SVNBACKUP2_REPO_STATE_YOUNGEST=0
 
 ```
 Usage: svn-backup2 [operation] <args>
+  none                            All repositories are checked and backuped
   version                         Print the version
-  full [<repository name> | all]  Force full backup on repository or "all"
+  full [<repository name> | all]  Force full backup on given repository or "all"
 ```
 
 ## Restoration
