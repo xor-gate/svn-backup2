@@ -13,6 +13,7 @@ Features and limitations:
 
  * Only supports one subversion root path which can contain multiple repositories
  * Single repository backup file for simplicity of restoration and efficient offsite backup transfering with `rsync`
+ * Can only restore the whole backup file into an empty repository
 
 ## Installation
 
@@ -76,15 +77,15 @@ Step 1: Create an empty repository
 svnadmin create /srv/svn/repository_1
 ```
 
-Step 2: Load the dumpfile
+Step 2: Uncompress the dumpfile as stream and load into svnadmin
 
 ```
-svnadmin load /srv/svn/repository_1 < repository_1.svnbackup2
+zcat /srv/svn-backup2/repository_1.svnbackup2 | svnadmin load /srv/svn/repository_1
 ```
 
 Step 3: There is no step 3!
 
-A simple bash command can load all repositories at once:
+A simple shell command can load all repositories at once:
 
 ```
 find . -type f -name "*.svnbackup2" | while read i; do repository_name=`basename "$i" .svnbackup2`; svnadmin create "$repository_name" && zcat "$i" | svnadmin load "$repository_name"; done
