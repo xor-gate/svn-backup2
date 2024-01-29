@@ -29,7 +29,7 @@
 #
 # Application is hosted at: https://github.com/xor-gate/svn-backup2
 ##
-VERSION="0.1.1"
+VERSION="0.1.2"
 EXIT_CODE=0
 
 ###
@@ -266,6 +266,7 @@ function repository_backup_subversion() {
 
 		repository_backup_integrity_check
 
+		log "Starting svnadmin dump, this can take a while..."
 		svnadmin dump -q -r "0:${YOUNGEST}" "${REPO_PATH}" | gzip -c > "${REPO_BACKUP_FILE}" 2> /dev/null
 
 		if [ $? = 0 ]; then
@@ -403,12 +404,13 @@ function operation_help() {
 	echo "  full [<repository name> | all]  Force full backup on repository or \"all\""
 }
 
+
+load_config_file
+
 check_and_create_paths
 if [ $EXIT_CODE != 0 ]; then
 	exit ${EXIT_CODE}
 fi
-
-load_config_file
 
 ###
 # Argparse
