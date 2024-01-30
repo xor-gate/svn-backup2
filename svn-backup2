@@ -29,7 +29,7 @@
 #
 # Application is hosted at: https://github.com/xor-gate/svn-backup2
 ##
-VERSION="0.1.2"
+VERSION="0.1.3"
 EXIT_CODE=0
 
 ###
@@ -166,6 +166,13 @@ function repository_load_state() {
 	export REPO_PATH="${SVNBACKUP2_CFG_REPOSITORIES_PATH}/${REPO_NAME}"
 	export REPO_STATE_FILE="${SVNBACKUP2_BACKUP_STATE_PATH}/${REPO_NAME}.state"
 	export REPO_BACKUP_FILE="${SVNBACKUP2_CFG_BACKUP_PATH}/${REPO_NAME}.svnbackup2"
+
+	if [ -f ${REPO_BACKUP_FILE} ] && [ ! -f ${REPO_STATE_FILE} ]; then
+		log "ERROR: Backup found for repository \"${REPO_NAME}\" but state file is missing,\
+something went horribly wrong, you must recreate a full backup"
+		EXIT_CODE=1
+		return
+	fi
 
 	if [ ! -f ${REPO_STATE_FILE} ]; then
 		return
@@ -336,6 +343,9 @@ function repository_backup() {
 
 	# Load previous state and check integrity
 	repository_load_state
+	if [ ${EXIT_CODE} != 0 ]; then
+		return
+	fi
 
 	export SVNBACKUP2_REPO_STATE_LAST_BACKUP_START_TIME="$(date +%s)"
 	log "Starting backup of repository ${REPO_NAME}"
@@ -353,15 +363,18 @@ function repository_backup() {
 # Discover and backup all repositories in SVNBACKUP2_CFG_REPOSITORIES_PATH
 ###
 function repositories_backup() {
-	for repository in `ls -1 ${SVNBACKUP2_CFG_REPOSITORIES_PATH}`; do
-		repository_path="${SVNBACKUP2_CFG_REPOSITORIES_PATH}/${repository}"
+	for repository_name in `ls -1 ${SVNBACKUP2_CFG_REPOSITORIES_PATH}`; do
+		repository_path="${SVNBACKUP2_CFG_REPOSITORIES_PATH}/${repository_name}"
 
 		# filter out only directories where the db folder is not present
 		if [ ! -d "${repository_path}/db" ]; then
 			continue
 		fi
 
-		repository_backup "${repository}"
+		repository_backup "${repository_name}"
+		if [ ${EXIT_CODE} != 0 ]; then
+			break
+		fi
 	done
 }
 
