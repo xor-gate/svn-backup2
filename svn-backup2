@@ -29,7 +29,7 @@
 #
 # Application is hosted at: https://github.com/xor-gate/svn-backup2
 ##
-VERSION="0.1.3"
+VERSION="0.1.4"
 EXIT_CODE=0
 
 ###
