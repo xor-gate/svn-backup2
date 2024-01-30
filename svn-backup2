@@ -158,6 +158,7 @@ function repository_store_state() {
 #  SVNBACKUP2_BACKUP_STATE_PATH
 #  SVNBACKUP2_CFG_BACKUP_PATH
 # Sets:
+#  EXIT_CODE != 0: On serious error
 #  REPO_PATH
 #  REPO_STATE_FILE
 #  REPO_BACKUP_FILE
@@ -167,6 +168,12 @@ function repository_load_state() {
 	export REPO_STATE_FILE="${SVNBACKUP2_BACKUP_STATE_PATH}/${REPO_NAME}.state"
 	export REPO_BACKUP_FILE="${SVNBACKUP2_CFG_BACKUP_PATH}/${REPO_NAME}.svnbackup2"
 
+	# Make sure we drop all previous loaded repository state variables from another repository
+	for state_var in `env | grep SVNBACKUP2_REPO_STATE_`; do
+		unset ${state_var}
+	done
+
+	# When backup exists and state file is missing we notify the caller 
 	if [ -f ${REPO_BACKUP_FILE} ] && [ ! -f ${REPO_STATE_FILE} ]; then
 		log "ERROR: Backup found for repository \"${REPO_NAME}\" but state file is missing,\
 something went horribly wrong, you must recreate a full backup"
