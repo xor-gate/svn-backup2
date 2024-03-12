@@ -4,7 +4,7 @@ The `svn-backup2` application is a frugal Subversion backup solution inspired by
 Orignally written and tested for Debian 12 in Bash but could be adapted to other systems.
 
 It creates and updates a single file per repository and consists of multiple gzip compressed archives. It is sha256 checksumed to
-detect bit-rot before appending a new incremental backup. This is possible because `svnadmin load` is able to load from a stream of multiple gzip dumps. 
+detect bit-rot before appending a new incremental backup. This is possible because `svnadmin load` is able to load from a stream of multiple dumps. 
 At first run it generates a full-backup and runs `svnadmin verify`.
 
 This script is designed to be run as root. But it is possible when correct permissions are given to run as non-root user.
@@ -36,6 +36,8 @@ chown -v root:root ${FILE}
 * `/var/log/svn-backup2.log`: Logfile
 * `/srv/svn`: Subversion repositories root path (configurable)
 * `/srv/svn-backup2/<repository name>.svnbackup2`: Backup file (multiple concatinated gzip files) (configurable)
+* `/srv/svn-backup2/<repository name>/dataset_<n>/0-<..>.svnbackup2`: Full backup in dataset n
+* `/srv/svn-backup2/<repository name>/dataset_<n>/<x>-<y>.svnbackup2`: Incremental backup in dataset n
 * `/var/tmp/svn-backup2/<repository name>.state`: State of a single repository backup
 
 ## Configuration file (`/etc/svn-backup2.conf`)
@@ -44,8 +46,11 @@ The file is a set of shell environment variables. It will be created on first ru
 with the following defaults:
 
 ```
+SVNBACKUP2_CFG_VERSION=1
 SVNBACKUP2_CFG_REPOSITORIES_PATH="/srv/svn"
 SVNBACKUP2_CFG_BACKUP_PATH="/srv/svn-backup2"
+SVNBACKUP2_CFG_USE_SINGLE_FILE=1
+SVNBACKUP2_CFG_BACKUP_NR_DATASETS=0
 ```
 
 ## Repository backup state file

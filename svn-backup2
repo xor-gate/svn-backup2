@@ -29,7 +29,8 @@
 #
 # Application is hosted at: https://github.com/xor-gate/svn-backup2
 ##
-VERSION="0.1.4"
+VERSION="0.2.0"
+CFG_VERSION=1 # SVNBACKUP2_CONFIG_FILE version
 EXIT_CODE=0
 
 ###
@@ -42,8 +43,11 @@ SVNBACKUP2_BACKUP_STATE_PATH="/var/tmp/svn-backup2"
 ###
 # Configuration defaults
 ###
-SVNBACKUP2_CFG_REPOSITORIES_PATH="/srv/svn"
-SVNBACKUP2_CFG_BACKUP_PATH="/srv/svn-backup2"
+SVNBACKUP2_CFG_VERSION=0
+SVNBACKUP2_CFG_REPOSITORIES_PATH="/srv/svn" # Since v0
+SVNBACKUP2_CFG_BACKUP_PATH="/srv/svn-backup2" # Since v0
+SVNBACKUP2_CFG_USE_SINGLE_FILE=1 # Since v1
+SVNBACKUP2_CFG_BACKUP_NR_DATASETS=0 # Since v1
 
 ###
 # Log to stdout and archive to file with datetime prefix
@@ -56,6 +60,9 @@ function log() {
 
 ###
 # Check and create paths
+#
+# Sets:
+#  EXIT_CODE
 ###
 function check_and_create_paths() {
 	if [ ! command -v svnadmin &> /dev/null ]; then
@@ -123,19 +130,84 @@ function check_and_create_paths() {
 }
 
 ###
-# Load global configuration file from $SVNBACKUP2_CONFIG_FILE
+# Export global configuration file variables
 #
 # Sets:
+#  SVNBACKUP2_CFG_VERSION
 #  SVNBACKUP2_CFG_REPOSITORIES_PATH
 #  SVNBACKUP2_CFG_BACKUP_PATH
+#  SVNBACKUP2_CFG_USE_SINGLE_FILE
+#  SVNBACKUP2_CFG_BACKUP_NR_DATASETS
+###
+function export_config_file() {
+	export SVNBACKUP2_CFG_VERSION
+	export SVNBACKUP2_CFG_REPOSITORIES_PATH
+	export SVNBACKUP2_CFG_BACKUP_PATH
+	export SVNBACKUP2_CFG_USE_SINGLE_FILE
+	export SVNBACKUP2_CFG_BACKUP_NR_DATASETS
+}
+
+###
+# Load global configuration file from $SVNBACKUP2_CONFIG_FILE
+# See also export_config_file
+#
+# Sets:
+#  EXIT_CODE
 ###
 function load_config_file() {
 	set -a
 	source ${SVNBACKUP2_CONFIG_FILE}
 	set +a
 
-	export SVNBACKUP2_CFG_REPOSITORIES_PATH
-	export SVNBACKUP2_CFG_BACKUP_PATH
+	export_config_file
+
+	if [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 1 ] && [ ${SVNBACKUP2_CFG_BACKUP_NR_DATASETS} -gt 0 ]; then
+		log "Configuration error: Single file and datasets cannot be set at the same time"
+		EXIT_CODE=1
+	fi
+}
+
+###
+# Upgrade global configuration file to the next version
+# Return: 1 when configuration file is latest, 0 when not upgraded to latest
+###
+function upgrade_config_file_to_next_version() {
+	if [ ${CFG_VERSION} -eq ${SVNBACKUP2_CFG_VERSION} ]; then
+		return 1
+	fi
+
+	case ${SVNBACKUP2_CFG_VERSION} in
+		0)
+			# v0.1.4 -> v0.2.0 (v0 -> v1 config)
+			SVNBACKUP2_CFG_USE_SINGLE_FILE=1
+			SVNBACKUP2_CFG_BACKUP_NR_DATASETS=0
+			;;
+	esac
+
+	export_config_file
+	export SVNBACKUP2_CFG_VERSION=$((${SVNBACKUP2_CFG_VERSION} + 1))
+
+	return 0
+}
+
+###
+# Upgrade global configuration file $SVNBACKUP2_CONFIG_FILE
+###
+function upgrade_config_file() {
+	if [ ${CFG_VERSION} -eq ${SVNBACKUP2_CFG_VERSION} ]; then
+		return
+	fi
+
+	while true; do
+		upgrade_config_file_to_next_version
+		if [ $? -eq 1 ]; then
+			break
+		fi
+	done
+
+	env | grep SVNBACKUP2_CFG > ${SVNBACKUP2_CONFIG_FILE}
+	log "Updated configuration file at ${SVNBACKUP2_CONFIG_FILE}"
+	cat ${SVNBACKUP2_CONFIG_FILE}
 }
 
 ###
@@ -161,11 +233,13 @@ function repository_store_state() {
 #  EXIT_CODE != 0: On serious error
 #  REPO_PATH
 #  REPO_STATE_FILE
+#  REPO_BACKUP_PATH
 #  REPO_BACKUP_FILE
 ###
 function repository_load_state() {
 	export REPO_PATH="${SVNBACKUP2_CFG_REPOSITORIES_PATH}/${REPO_NAME}"
 	export REPO_STATE_FILE="${SVNBACKUP2_BACKUP_STATE_PATH}/${REPO_NAME}.state"
+	export REPO_BACKUP_PATH="${SVNBACKUP2_CFG_BACKUP_PATH}/${REPO_NAME}"
 	export REPO_BACKUP_FILE="${SVNBACKUP2_CFG_BACKUP_PATH}/${REPO_NAME}.svnbackup2"
 
 	# Make sure we drop all previous loaded repository state variables from another repository
@@ -174,7 +248,7 @@ function repository_load_state() {
 	done
 
 	# When backup exists and state file is missing we notify the caller 
-	if [ -f ${REPO_BACKUP_FILE} ] && [ ! -f ${REPO_STATE_FILE} ]; then
+	if [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 1 ] && [ -f ${REPO_BACKUP_FILE} ] && [ ! -f ${REPO_STATE_FILE} ]; then
 		log "ERROR: Backup found for repository \"${REPO_NAME}\" but state file is missing,\
 something went horribly wrong, you must recreate a full backup"
 		EXIT_CODE=1
@@ -186,21 +260,33 @@ something went horribly wrong, you must recreate a full backup"
 	fi
 
 	SVNBACKUP2_REPO_STATE_YOUNGEST=0
+	SVNBACKUP2_REPO_STATE_DATASET_NR=1
 	source ${REPO_STATE_FILE}
+
+	if [ ${SVNBACKUP2_CFG_BACKUP_NR_DATASETS} -gt 0 ]; then
+		REPO_BACKUP_PATH="${REPO_BACKUP_PATH}/dataset_${SVNBACKUP2_REPO_STATE_DATASET_NR}"
+		mkdir -p ${REPO_BACKUP_PATH}
+	fi
 }
 
 ###
-# Check integrity of an existing repository backup
+# Check integrity of an existing repository backup only when SVNBACKUP2_CFG_USE_SINGLE_FILE is set
 #
 # Needs:
 #  REPO_NAME
 #  REPO_BACKUP_FILE
+#  SVNBACKUP2_CFG_USE_SINGLE_FILE
 #  SVNBACKUP2_REPO_STATE_CHECKSUM
 # Sets:
 #  REPO_CHECKSUM_OK
 ###
 function repository_backup_integrity_check() {
 	REPO_CHECKSUM_OK=0
+
+	if [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 0 ]; then
+		REPO_CHECKSUM_OK=1
+		return
+	fi
 
 	if [ ! -f "${REPO_BACKUP_FILE}" ]; then
 		log "Running svnadmin verify on database because this is the first time, this may take a while..."
@@ -241,10 +327,16 @@ function repository_backup_integrity_check() {
 #  REPO_NAME
 #  REPO_BACKUP_FILE
 #  REPO_BACKUP_FILE_CHANGED
+#  SVNBACKUP2_CFG_USE_SINGLE_FILE
 # Sets:
 #  SVNBACKUP2_REPO_STATE_CHECKSUM
 ###
 function repository_backup_create_checksum() {
+	if [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 0 ]; then
+		export SVNBACKUP2_REPO_STATE_CHECKSUM=""
+		return
+	fi
+
 	if [ ! -f "${REPO_BACKUP_FILE}" ]; then
 		log "WARNING: No backup created for repository \"${REPO_NAME}\", checksum skipped"
 		return
@@ -262,8 +354,11 @@ function repository_backup_create_checksum() {
 # Lookup youngest subversion revision and check if a backup must be made
 #
 # Needs:
+#  REPO_NAME
 #  REPO_PATH
+#  REPO_BACKUP_PATH
 #  REPO_BACKUP_FILE
+#  SVNBACKUP2_CFG_USE_SINGLE_FILE
 #  SVNBACKUP2_REPO_STATE_YOUNGEST
 # Sets:
 #  REPO_BACKUP_FILE_CHANGED
@@ -274,6 +369,12 @@ function repository_backup_subversion() {
 	YOUNGEST=$(svnlook youngest "${REPO_PATH}")
 
 	log "Detected latest revision of repository is ${YOUNGEST}, backup has archived until revision ${SVNBACKUP2_REPO_STATE_YOUNGEST}"
+
+	# The dataset full backup file is stored in the REPO_BACKUP_PATH
+	if [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 0 ]; then
+		REPO_BACKUP_FILE="${REPO_BACKUP_PATH}/full.svnbackup2"
+		log "Backup ${REPO_NAME} to dataset ${SVNBACKUP2_REPO_STATE_DATASET_NR}"
+	fi
 
 	if [ ! -f ${REPO_BACKUP_FILE} ]; then
 		log "No previous backup found, running full backup until revision ${YOUNGEST}"
@@ -293,18 +394,23 @@ function repository_backup_subversion() {
 		log "Backup already up to date"
 		REPO_BACKUP_FILE_CHANGED=0
 	else
-		REV_FILTER="$(($SVNBACKUP2_REPO_STATE_YOUNGEST + 1)):${YOUNGEST}"
-
-		repository_backup_integrity_check
-		if [ ${REPO_CHECKSUM_OK} = 0 ]; then
-			log "ERROR: incremental backup skipped due to previous integrity check failure"
-			EXIT_CODE=1
-			return
-		fi
+		REV_FROM="$(($SVNBACKUP2_REPO_STATE_YOUNGEST + 1))"
+		REV_TO="${YOUNGEST}"
+		REV_FILTER="${REV_FROM}:${REV_TO}"
 
 		log "Running incremental backup between revisions ${REV_FILTER}"
-		svnadmin dump -q -r ${REV_FILTER} --incremental "${REPO_PATH}" | gzip -c >> "${REPO_BACKUP_FILE}" 2> /dev/null
+		if [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 1 ]; then
+			repository_backup_integrity_check
+			if [ ${REPO_CHECKSUM_OK} = 0 ]; then
+				log "ERROR: incremental backup skipped due to previous integrity check failure"
+				EXIT_CODE=1
+				return
+			fi
+		else
+			REPO_BACKUP_FILE="${REPO_BACKUP_PATH}/incr_rev${REV_FROM}-rev${REV_TO}.svnbackup2"
+		fi
 
+		svnadmin dump -q -r ${REV_FILTER} --incremental "${REPO_PATH}" | gzip -c >> "${REPO_BACKUP_FILE}" 2> /dev/null
 		if [ $? = 0 ]; then
 			log "svnadmin dump ok"
 		else
@@ -425,8 +531,12 @@ function operation_help() {
 	echo "  full [<repository name> | all]  Force full backup on repository or \"all\""
 }
 
-
 load_config_file
+if [ $EXIT_CODE != 0 ]; then
+	exit ${EXIT_CODE}
+fi
+
+upgrade_config_file
 
 check_and_create_paths
 if [ $EXIT_CODE != 0 ]; then
