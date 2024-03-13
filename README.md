@@ -3,17 +3,31 @@
 The `svn-backup2` application is a frugal Subversion backup solution inspired by [adamonduty/svn-backup](https://github.com/adamonduty/svn-backup).
 Orignally written and tested for Debian 12 in Bash but could be adapted to other systems.
 
-It creates and updates a single file per repository and consists of multiple gzip compressed archives. It is sha256 checksumed to
-detect bit-rot before appending a new incremental backup. This is possible because `svnadmin load` is able to load from a stream of multiple dumps. 
 At first run it generates a full-backup and runs `svnadmin verify`.
 
 This script is designed to be run as root. But it is possible when correct permissions are given to run as non-root user.
 
-Features and limitations:
+## Features and limitations
 
+### Single file mode
+
+It creates and updates a single file per repository and consists of multiple gzip compressed archives. It is sha256 checksumed to
+detect bit-rot before appending a new incremental backup. This is possible because `svnadmin load` is able to load from a stream of multiple dumps. 
+This is not rsync efficient.
+
+ * Set `SVNBACKUP2_CFG_USE_SINGLE_FILE=1` (and `SVNBACKUP2_CFG_BACKUP_NR_DATASETS=0`)
  * Only supports one subversion root path which can contain multiple repositories
- * Single repository backup file for simplicity of restoration and efficient offsite backup transfering with `rsync`
+ * Single repository backup file for simplicity of restoration
  * Can only restore the whole backup file into an empty repository
+ * `${SVNBACKUP2_CFG_BACKUP_PATH}/<repository name>.svnbackup2`: Backup file (multiple concatinated gzip files) (configurable)
+
+### Dataset mode
+
+In dataset mode a full backup is written and per incremental run a new file is created. This is rsync efficient.
+
+ * Set `SVNBACKUP2_CFG_BACKUP_NR_DATASETS=1` or higher (and `SVNBACKUP2_CFG_USE_SINGLE_FILE=0`) 
+ * `${SVNBACKUP2_CFG_BACKUP_PATH}/<repository name>/dataset_<n>/<repository name>_full.svnbackup2`: Full backup in dataset n
+ * `${SVNBACKUP2_CFG_BACKUP_PATH}/<repository name>/dataset_<n>/<repository name>_incr_rev<x>-rev<y>.svnbackup2`: Incremental backup in dataset n
 
 ## Installation
 
@@ -21,11 +35,11 @@ Install dependencies on Debian Linux 12:
 
 `apt install subversion curl`
 
-Download and install version `0.1.4` to `/usr/local/bin/svn-backup2` in a oneliner with curl:
+Download and install version `0.2.0` to `/usr/local/bin/svn-backup2` in a oneliner with curl:
 
 ```
 FILE=/usr/local/bin/svn-backup2 &&
-curl -o ${FILE} https://raw.githubusercontent.com/xor-gate/svn-backup2/v0.1.4/svn-backup2 &&
+curl -o ${FILE} https://raw.githubusercontent.com/xor-gate/svn-backup2/v0.2.0/svn-backup2 &&
 chmod -v 755 ${FILE} &&
 chown -v root:root ${FILE}
 ```
@@ -35,9 +49,6 @@ chown -v root:root ${FILE}
 * `/etc/svn-backup2.conf`: Configuration file
 * `/var/log/svn-backup2.log`: Logfile
 * `/srv/svn`: Subversion repositories root path (configurable)
-* `/srv/svn-backup2/<repository name>.svnbackup2`: Backup file (multiple concatinated gzip files) (configurable)
-* `/srv/svn-backup2/<repository name>/dataset_<n>/0-<..>.svnbackup2`: Full backup in dataset n
-* `/srv/svn-backup2/<repository name>/dataset_<n>/<x>-<y>.svnbackup2`: Incremental backup in dataset n
 * `/var/tmp/svn-backup2/<repository name>.state`: State of a single repository backup
 
 ## Configuration file (`/etc/svn-backup2.conf`)
@@ -76,7 +87,7 @@ Usage: svn-backup2 [operation] <args>
   full [<repository name> | all]  Force full backup on given repository or "all"
 ```
 
-## Restoration
+## Restoration of single file
 
 svn-backup2 generates simple subversion dumpfiles that can be stream loaded into
 `svnadmin load`.
@@ -99,6 +110,15 @@ A simple shell command can load all repositories at once:
 
 ```
 find . -type f -name "*.svnbackup2" | while read i; do repository_name=`basename "$i" .svnbackup2`; svnadmin create "$repository_name" && zcat "$i" | svnadmin load "$repository_name"; done
+```
+
+## Restoration of dataset
+
+With `ls` you can sort on creation date and load it with `svnadmin`
+
+```
+$ svnadmin create /tmp/testrepo
+$ for backup in `ls -1 -r -t --time=creation /srv/svn-backup2/testrepo2/dataset_1/*`; do zcat $backup | svnadmin load /tmp/testrepo; done
 ```
 
 # License

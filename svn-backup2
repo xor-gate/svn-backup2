@@ -4,7 +4,9 @@
 # It generates and update just a single gzipped and sha256 checksumed file per repository.
 # At first run it generates a full-backup and runs `svnadmin verify`
 # The next runs append an incremental backup when there are changes. Before every append the
-# backup integrity is checked.
+# backup integrity is checked. It can also work in "dataset" mode where multiple full and incremental
+# backups are stored. The dataset mode is usefull when transfering over a slow link to offsite via
+# rsync.
 #
 # svn-backup2 is licensed under the MIT License
 #
@@ -263,8 +265,27 @@ something went horribly wrong, you must recreate a full backup"
 	SVNBACKUP2_REPO_STATE_DATASET_NR=1
 	source ${REPO_STATE_FILE}
 
+	# Dataset mode
 	if [ ${SVNBACKUP2_CFG_BACKUP_NR_DATASETS} -gt 0 ]; then
+
+		# Rotate dataset when operation full backup is requested
+		if [ ! -z ${OPERATION_FULL_BACKUP} ]; then
+			log "Full backup requested for ${REPO_NAME} in dataset mode (current dataset ${SVNBACKUP2_REPO_STATE_DATASET_NR})"
+			SVNBACKUP2_REPO_STATE_DATASET_NR=$((${SVNBACKUP2_REPO_STATE_DATASET_NR} + 1))
+			if [ ${SVNBACKUP2_REPO_STATE_DATASET_NR} -gt ${SVNBACKUP2_CFG_BACKUP_NR_DATASETS} ]; then
+				SVNBACKUP2_REPO_STATE_DATASET_NR=1
+			fi
+			export SVNBACKUP2_REPO_STATE_DATASET_NR
+		fi
+
 		REPO_BACKUP_PATH="${REPO_BACKUP_PATH}/dataset_${SVNBACKUP2_REPO_STATE_DATASET_NR}"
+
+		# Remove target dataset
+		if [ ! -z ${OPERATION_FULL_BACKUP} ]; then
+			log "Remove old dataset at ${REPO_BACKUP_PATH}"
+			rm -Rf ${REPO_BACKUP_PATH}
+		fi
+
 		mkdir -p ${REPO_BACKUP_PATH}
 	fi
 }
@@ -354,6 +375,7 @@ function repository_backup_create_checksum() {
 # Lookup youngest subversion revision and check if a backup must be made
 #
 # Needs:
+#  OPERATION_FULL_BACKUP
 #  REPO_NAME
 #  REPO_PATH
 #  REPO_BACKUP_PATH
@@ -368,16 +390,21 @@ function repository_backup_subversion() {
 	REPO_BACKUP_FILE_CHANGED=1
 	YOUNGEST=$(svnlook youngest "${REPO_PATH}")
 
+	if [ ! -z ${OPERATION_FULL_BACKUP} ]; then
+		export SVNBACKUP2_REPO_STATE_YOUNGEST=0
+	fi
+
 	log "Detected latest revision of repository is ${YOUNGEST}, backup has archived until revision ${SVNBACKUP2_REPO_STATE_YOUNGEST}"
 
 	# The dataset full backup file is stored in the REPO_BACKUP_PATH
 	if [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 0 ]; then
-		REPO_BACKUP_FILE="${REPO_BACKUP_PATH}/full.svnbackup2"
+		REPO_BACKUP_FILE="${REPO_BACKUP_PATH}/${REPO_NAME}_full.svnbackup2"
 		log "Backup ${REPO_NAME} to dataset ${SVNBACKUP2_REPO_STATE_DATASET_NR}"
 	fi
 
 	if [ ! -f ${REPO_BACKUP_FILE} ]; then
 		log "No previous backup found, running full backup until revision ${YOUNGEST}"
+		log "Full backup to file: ${REPO_BACKUP_FILE}"
 
 		repository_backup_integrity_check
 
@@ -407,7 +434,7 @@ function repository_backup_subversion() {
 				return
 			fi
 		else
-			REPO_BACKUP_FILE="${REPO_BACKUP_PATH}/incr_rev${REV_FROM}-rev${REV_TO}.svnbackup2"
+			REPO_BACKUP_FILE="${REPO_BACKUP_PATH}/${REPO_NAME}_incr_rev${REV_FROM}-rev${REV_TO}.svnbackup2"
 		fi
 
 		svnadmin dump -q -r ${REV_FILTER} --incremental "${REPO_PATH}" | gzip -c >> "${REPO_BACKUP_FILE}" 2> /dev/null
@@ -496,8 +523,13 @@ function repositories_backup() {
 # Full backup operation from CLI
 #
 # $1: What to backup forced-full (e.g 'all' or '<repository name>')
+#
+# Sets:
+#  OPERATION_FULL_BACKUP
 ###
 function operation_full_backup() {
+	export OPERATION_FULL_BACKUP=1
+
 	what=$1
 
 	if [ "${what}" = '' ]; then
@@ -506,20 +538,43 @@ function operation_full_backup() {
 		return
 	fi
 
+
 	case ${what} in
 		all)
 			rm_filter="${SVNBACKUP2_CFG_BACKUP_PATH}/*.svnbackup2"
-			log "Removing all old backups at ${rm_filter}"
-			rm ${rm_filter} 
+			log "Force removing all old single file backups at ${rm_filter}"
+			rm -f ${rm_filter}
+
 			repositories_backup
 			;;
 		*)
 			rm_filter="${SVNBACKUP2_CFG_BACKUP_PATH}/${what}.svnbackup2"
-			log "Removing backup at ${rm_filter}"
-			rm  ${rm_filter}
+			log "Force removing single file backup at ${rm_filter}"
+			rm -f ${rm_filter}
+
 			repository_backup "${what}"
 			;;
 	esac
+}
+
+###
+# Print the current backup path
+###
+function operation_backup_path() {
+	export REPO_NAME="$1"
+
+	# Load previous state
+	repository_load_state
+	if [ ${EXIT_CODE} != 0 ]; then
+		return
+	fi
+
+	
+	if [ ${SVNBACKUP2_CFG_BACKUP_NR_DATASETS} -gt 0 ]; then
+		echo "${REPO_BACKUP_PATH}"
+	elif [ ${SVNBACKUP2_CFG_USE_SINGLE_FILE} -eq 0 ]; then
+		echo "${REPO_BACKUP_FILE}"
+	fi
 }
 
 ###
@@ -529,6 +584,8 @@ function operation_help() {
 	echo "Usage: svn-backup2 [operation] <args>"
 	echo "  version                         Print the version"
 	echo "  full [<repository name> | all]  Force full backup on repository or \"all\""
+	echo "  incr [<repository name>]        Backup incremental (default)"
+	echo "  path [<repository name>]		Repository backup path"
 }
 
 load_config_file
@@ -556,6 +613,12 @@ case ${ARG_OPERATION} in
 		;;
 	full)
 		operation_full_backup $2
+		;;
+	incr)
+		repository_backup $2
+		;;
+	path)
+		operation_backup_path $2
 		;;
 	*)
 		repositories_backup
