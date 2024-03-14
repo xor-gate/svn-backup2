@@ -87,6 +87,16 @@ Usage: svn-backup2 [operation] <args>
   full [<repository name> | all]  Force full backup on given repository or "all"
 ```
 
+## Cron in dataset mode
+
+We use cron to cycle between the different datasets. As an example we generate a full
+backup once a month. And the other days an incremental:
+
+```
+5 2 1 * * /usr/local/bin/svn-backup2 full all
+5 2 2-31 * * /usr/local/bin/svn-backup2
+```
+
 ## Restoration of single file
 
 svn-backup2 generates simple subversion dumpfiles that can be stream loaded into
