@@ -209,7 +209,10 @@ function upgrade_config_file() {
 
 	env | grep SVNBACKUP2_CFG > ${SVNBACKUP2_CONFIG_FILE}
 	log "Updated configuration file at ${SVNBACKUP2_CONFIG_FILE}"
+	log "Please re-run svn-backup2"
 	cat ${SVNBACKUP2_CONFIG_FILE}
+
+	exit 0
 }
 
 ###
