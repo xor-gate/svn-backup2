@@ -35,11 +35,11 @@ Install dependencies on Debian Linux 12:
 
 `apt install subversion curl`
 
-Download and install version `0.2.1` to `/usr/local/bin/svn-backup2` in a oneliner with curl:
+Download and install version `0.2.2` to `/usr/local/bin/svn-backup2` in a oneliner with curl:
 
 ```
 FILE=/usr/local/bin/svn-backup2 &&
-curl -o ${FILE} https://raw.githubusercontent.com/xor-gate/svn-backup2/v0.2.1/svn-backup2 &&
+curl -o ${FILE} https://raw.githubusercontent.com/xor-gate/svn-backup2/v0.2.2/svn-backup2 &&
 chmod -v 755 ${FILE} &&
 chown -v root:root ${FILE}
 ```
