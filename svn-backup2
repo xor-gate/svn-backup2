@@ -31,7 +31,7 @@
 #
 # Application is hosted at: https://github.com/xor-gate/svn-backup2
 ##
-VERSION="0.2.1"
+VERSION="0.2.2"
 CFG_VERSION=1 # SVNBACKUP2_CONFIG_FILE version
 EXIT_CODE=0
 
@@ -279,7 +279,6 @@ something went horribly wrong, you must recreate a full backup"
 			if [ ${SVNBACKUP2_REPO_STATE_DATASET_NR} -gt ${SVNBACKUP2_CFG_BACKUP_NR_DATASETS} ]; then
 				SVNBACKUP2_REPO_STATE_DATASET_NR=1
 			fi
-			export SVNBACKUP2_REPO_STATE_DATASET_NR
 		fi
 
 		REPO_BACKUP_PATH="${REPO_BACKUP_PATH}/dataset_${SVNBACKUP2_REPO_STATE_DATASET_NR}"
@@ -291,6 +290,7 @@ something went horribly wrong, you must recreate a full backup"
 		fi
 
 		mkdir -p ${REPO_BACKUP_PATH}
+		export SVNBACKUP2_REPO_STATE_DATASET_NR
 	fi
 }
 
